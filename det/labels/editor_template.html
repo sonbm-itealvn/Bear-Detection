@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><title>Bear box editor</title>
+<style>
+ body{margin:0;font:14px system-ui,sans-serif;background:#1e1e1e;color:#eee}
+ #bar{display:flex;gap:12px;align-items:center;padding:8px 12px;background:#2b2b2b;flex-wrap:wrap}
+ #bar button{font:inherit;padding:4px 10px}
+ #wrap{display:flex;justify-content:center;padding:8px}
+ canvas{background:#000;cursor:crosshair;max-width:100%}
+ #help{padding:4px 12px;color:#aaa;font-size:12px}
+ .nobear{color:#f66;font-weight:bold}
+</style></head><body>
+<div id="bar">
+ <button id="prev">◀ p</button><span id="pos"></span><button id="next">n ▶</button>
+ <span id="name"></span><span id="flag"></span>
+ <button id="export">Export boxes_reviewed.json</button><span id="saved"></span>
+</div>
+<div id="help">Kéo trên vùng trống = thêm khung · bấm vào khung = chọn · kéo góc = đổi cỡ · kéo giữa = di chuyển ·
+ Delete = xóa khung · x = đánh dấu "không có gấu" · n / p = ảnh sau / trước · tiến độ tự lưu trong trình duyệt.</div>
+<div id="wrap"><canvas id="cv"></canvas></div>
+<script>
+const ITEMS = /*BOXES*/[];
+const KEY = "bear_editor_" + (ITEMS.length ? ITEMS[0].sha1 : "x") + "_" + ITEMS.length;
+let state = ITEMS.map(it => ({boxes: it.boxes.map(b => b.slice()), nobear: false, seen: false}));
+try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.length === state.length) state = s; } catch (e) {}
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+let k = 0, img = new Image(), view = 1, sel = -1, drag = null;
+const H = 8;
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(state)); document.getElementById("saved").textContent = "đã lưu"; } catch (e) {} }
+function load(i){
+  k = Math.max(0, Math.min(ITEMS.length - 1, i)); sel = -1; state[k].seen = true;
+  img = new Image(); img.onload = () => { view = Math.min(1, (window.innerWidth - 32) / img.width, (window.innerHeight - 110) / img.height);
+    cv.width = Math.round(img.width * view); cv.height = Math.round(img.height * view); draw(); };
+  img.src = ITEMS[k].file;
+  document.getElementById("pos").textContent = (k + 1) + " / " + ITEMS.length;
+  document.getElementById("name").textContent = ITEMS[k].name || "";
+  save();
+}
+function draw(){
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  state[k].boxes.forEach((b, i) => {
+    ctx.strokeStyle = i === sel ? "#0af" : "#0f0"; ctx.lineWidth = i === sel ? 3 : 2;
+    ctx.strokeRect(b[0] * view, b[1] * view, (b[2] - b[0]) * view, (b[3] - b[1]) * view);
+    if (i === sel) { ctx.fillStyle = "#0af"; corners(b).forEach(c => ctx.fillRect(c[0] * view - H / 2, c[1] * view - H / 2, H, H)); }
+  });
+  const f = document.getElementById("flag"); f.textContent = state[k].nobear ? "KHÔNG CÓ GẤU" : ""; f.className = "nobear";
+}
+function corners(b){ return [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]; }
+function pt(e){ const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width / view, (e.clientY - r.top) * cv.height / r.height / view]; }
+cv.onmousedown = e => {
+  const p = pt(e), tol = H / view;
+  if (sel >= 0) { const c = corners(state[k].boxes[sel]).findIndex(c => Math.abs(c[0] - p[0]) < tol && Math.abs(c[1] - p[1]) < tol);
+    if (c >= 0) { drag = {mode: "corner", c}; return; } }
+  const hit = state[k].boxes.map((b, i) => [b, i]).filter(([b]) => p[0] > b[0] && p[0] < b[2] && p[1] > b[1] && p[1] < b[3])
+    .sort((a, b) => (a[0][2] - a[0][0]) * (a[0][3] - a[0][1]) - (b[0][2] - b[0][0]) * (b[0][3] - b[0][1]));
+  if (hit.length) { sel = hit[0][1]; drag = {mode: "move", p, b: state[k].boxes[sel].slice()}; draw(); return; }
+  state[k].boxes.push([p[0], p[1], p[0], p[1]]); sel = state[k].boxes.length - 1; drag = {mode: "corner", c: 2}; draw();
+};
+cv.onmousemove = e => {
+  if (!drag) return; const p = pt(e), b = state[k].boxes[sel];
+  const cl = (v, m) => Math.max(0, Math.min(m, v));
+  if (drag.mode === "move") { const dx = p[0] - drag.p[0], dy = p[1] - drag.p[1];
+    b[0] = drag.b[0] + dx; b[2] = drag.b[2] + dx; b[1] = drag.b[1] + dy; b[3] = drag.b[3] + dy; }
+  else { const c = drag.c; if (c === 0 || c === 3) b[0] = cl(p[0], img.width); else b[2] = cl(p[0], img.width);
+    if (c === 0 || c === 1) b[1] = cl(p[1], img.height); else b[3] = cl(p[1], img.height); }
+  draw();
+};
+window.onmouseup = () => {
+  if (!drag) return; drag = null; const b = state[k].boxes[sel];
+  if (b) { const n = [Math.min(b[0], b[2]), Math.min(b[1], b[3]), Math.max(b[0], b[2]), Math.max(b[1], b[3])];
+    if (n[2] - n[0] < 3 || n[3] - n[1] < 3) { state[k].boxes.splice(sel, 1); sel = -1; } else state[k].boxes[sel] = n; }
+  draw(); save();
+};
+window.onkeydown = e => {
+  if (e.key === "n") load(k + 1); else if (e.key === "p") load(k - 1);
+  else if ((e.key === "Delete" || e.key === "Backspace") && sel >= 0) { state[k].boxes.splice(sel, 1); sel = -1; draw(); save(); }
+  else if (e.key === "x") { state[k].nobear = !state[k].nobear; draw(); save(); }
+};
+document.getElementById("prev").onclick = () => load(k - 1);
+document.getElementById("next").onclick = () => load(k + 1);
+document.getElementById("export").onclick = () => {
+  const out = ITEMS.map((it, i) => ({sha1: it.sha1, nobear: state[i].nobear, seen: state[i].seen,
+    boxes: state[i].boxes.map(b => b.map(v => v / it.scale))}));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], {type: "application/json"}));
+  a.download = "boxes_reviewed.json"; a.click();
+};
+if (ITEMS.length) load(0);
+</script></body></html>

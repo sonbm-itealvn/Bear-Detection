@@ -1,0 +1,23 @@
+# Install PyTorch first: pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+boto3==1.43.3
+ImageHash==4.3.2
+matplotlib==3.5.3
+numpy==1.26.4
+onnx==1.20.0
+onnxruntime==1.23.2
+onnxsim==0.4.36
+opencv-python==4.6.0.66
+opencv-python-headless==4.13.0.92
+pandas==2.3.3
+pillow==12.0.0
+protobuf==5.29.6
+requests==2.32.5
+sahi==0.11.15
+scikit-learn==1.7.2
+scipy==1.15.3
+timm==1.0.22
+tqdm==4.67.1
+transformers==4.57.3
+ultralytics==8.3.241
+git+https://github.com/openai/CLIP.git   # OpenAI CLIP (dataset audit / re-split scripts)
+yt-dlp                                   # always the newest release (older ones get HTTP 403 from YouTube)

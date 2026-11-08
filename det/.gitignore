@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pth
+*.onnx
+*.bin
+*.npy
+*.npz
+_backup/
+c/test_main
+.superpowers/

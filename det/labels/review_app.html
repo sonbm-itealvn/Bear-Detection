@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><title>Duyệt khung gấu</title>
+<style>
+ :root{--bg:#1b1b1b;--panel:#2a2a2a;--fg:#eee;--mut:#aaa;--ok:#2e9d4a;--bad:#c0392b;--warn:#d4a017}
+ body{margin:0;font:14px system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+ #bar{display:flex;gap:10px;align-items:center;padding:8px 12px;background:var(--panel);flex-wrap:wrap}
+ #bar button{font:inherit;padding:5px 12px;border-radius:4px;border:0;cursor:pointer}
+ .bok{background:var(--ok);color:#fff}.bno{background:var(--bad);color:#fff}.bnav{background:#444;color:#fff}.bexp{background:#2266cc;color:#fff}
+ #prog{flex:1;min-width:160px;height:8px;background:#444;border-radius:4px;overflow:hidden}#prog div{height:100%;background:var(--ok)}
+ #info{padding:6px 12px;display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+ .tag{padding:2px 8px;border-radius:10px;font-size:12px;background:#444}
+ .t-ok{background:var(--ok)}.t-edited{background:#2266cc}.t-nobear{background:var(--bad)}.t-none{background:#555}
+ #msg{color:var(--warn);font-weight:bold}
+ #wrap{display:flex;justify-content:center;padding:4px 8px}
+ canvas{background:#000;cursor:crosshair;max-width:100%}
+ #help{padding:4px 12px 10px;color:var(--mut);font-size:12px;line-height:1.6}
+ kbd{background:#444;border-radius:3px;padding:0 5px;color:#fff}
+</style></head><body>
+<div id="bar">
+ <b id="title"></b>
+ <button class="bnav" id="prev">◀ trước (p)</button>
+ <button class="bok" id="ok">Đúng ✓ (Space)</button>
+ <button class="bno" id="nobear">Không có gấu (x)</button>
+ <button class="bnav" id="reset">Khôi phục khung gốc (r)</button>
+ <button class="bnav" id="next">sau (n) ▶</button>
+ <button class="bnav" id="todo">ảnh chưa duyệt (u)</button>
+ <div id="prog"><div></div></div><span id="cnt"></span>
+ <button class="bexp" id="export">Export kết quả</button>
+</div>
+<div id="info"><span id="pos"></span><span id="kind" class="tag"></span><span id="state" class="tag"></span><span id="name"></span><span id="msg"></span></div>
+<div id="wrap"><canvas id="cv"></canvas></div>
+<div id="help">
+ <b>Cách làm:</b> mỗi ảnh, nếu mọi con gấu đều có khung đúng (xanh/vàng) → <kbd>Space</kbd>.
+ Khung sai → bấm vào khung rồi <kbd>Delete</kbd>, hoặc kéo góc/kéo giữa để sửa; gấu thiếu khung → kéo chuột vẽ khung mới; xong thì <kbd>Space</kbd>.
+ Ảnh không có gấu → <kbd>x</kbd>. Ảnh "KHÔNG GẤU": nếu đúng là không có gấu → <kbd>Space</kbd>; nếu thật ra có gấu → vẽ khung rồi <kbd>Space</kbd>.
+ Khung đỏ mảnh = vùng bỏ qua, không phải nhãn, không cần sửa (<kbd>h</kbd> ẩn/hiện). Nếu trong khung đỏ có con gấu chưa có khung: <b>double-click vào khung đỏ</b> để biến nó thành khung gấu, rồi chỉnh góc. Tiến độ tự lưu; xong thì bấm <b>Export kết quả</b> và gửi file .json.
+</div>
+<script>
+const PACK = /*PACK*/{"title": "", "items": []};
+const ITEMS = PACK.items;
+const KEY = "bear_review_" + PACK.title + "_" + ITEMS.length;
+const COL = {A: "#00d000", B: "#ffc800", H: "#2f8fff"};
+let st = ITEMS.map(it => ({decision: null, boxes: it.boxes.map(b => b.slice())}));
+try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.length === st.length) st = s; } catch (e) {}
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+let k = 0, img = new Image(), view = 1, sel = -1, drag = null, showIgnore = true;
+const HS = 8;
+const $ = id => document.getElementById(id);
+$("title").textContent = PACK.title;
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} }
+function done(){ return st.filter(s => s.decision).length; }
+function msg(t){ $("msg").textContent = t || ""; }
+function load(i){
+  k = Math.max(0, Math.min(ITEMS.length - 1, i)); sel = -1; msg("");
+  img = new Image();
+  img.onload = () => { view = Math.min(1, (window.innerWidth - 24) / img.width, (window.innerHeight - 150) / img.height);
+    cv.width = Math.round(img.width * view); cv.height = Math.round(img.height * view); draw(); };
+  img.src = ITEMS[k].file; info();
+}
+function info(){
+  const it = ITEMS[k], s = st[k];
+  $("pos").textContent = (k + 1) + " / " + ITEMS.length;
+  $("kind").textContent = it.cls === "bear" ? "ảnh GẤU · " + it.domain : "ảnh KHÔNG GẤU";
+  const lab = {ok: "đã duyệt: đúng", edited: "đã duyệt: đã sửa", nobear: "đã duyệt: không có gấu"};
+  $("state").textContent = s.decision ? lab[s.decision] : "chưa duyệt";
+  $("state").className = "tag t-" + (s.decision || "none");
+  $("name").textContent = it.name;
+  const d = done(); $("cnt").textContent = d + " / " + ITEMS.length;
+  $("prog").firstElementChild.style.width = (100 * d / ITEMS.length) + "%";
+}
+function corners(b){ return [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]; }
+function draw(){
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  if (showIgnore) { ctx.strokeStyle = "rgba(255,40,40,0.7)"; ctx.lineWidth = 1;
+    ITEMS[k].ignore.forEach(b => ctx.strokeRect(b[0] * view, b[1] * view, (b[2] - b[0]) * view, (b[3] - b[1]) * view)); }
+  st[k].boxes.forEach((b, i) => {
+    ctx.strokeStyle = i === sel ? "#fff" : (COL[b[4]] || COL.H); ctx.lineWidth = i === sel ? 3 : 2.5;
+    ctx.strokeRect(b[0] * view, b[1] * view, (b[2] - b[0]) * view, (b[3] - b[1]) * view);
+    if (i === sel) { ctx.fillStyle = "#fff"; corners(b).forEach(c => ctx.fillRect(c[0] * view - HS / 2, c[1] * view - HS / 2, HS, HS)); }
+  });
+  if (st[k].decision === "nobear") { ctx.fillStyle = "rgba(192,57,43,0.35)"; ctx.fillRect(0, 0, cv.width, cv.height); }
+}
+function edited(){ st[k].decision = "edited"; save(); info(); }
+function pt(e){ const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width / view, (e.clientY - r.top) * cv.height / r.height / view]; }
+cv.onmousedown = e => {
+  const p = pt(e), tol = HS / view, bs = st[k].boxes;
+  if (sel >= 0) { const c = corners(bs[sel]).findIndex(c => Math.abs(c[0] - p[0]) < tol && Math.abs(c[1] - p[1]) < tol);
+    if (c >= 0) { drag = {mode: "corner", c, moved: false}; return; } }
+  const hit = bs.map((b, i) => [b, i]).filter(([b]) => p[0] > b[0] && p[0] < b[2] && p[1] > b[1] && p[1] < b[3])
+    .sort((a, b) => (a[0][2] - a[0][0]) * (a[0][3] - a[0][1]) - (b[0][2] - b[0][0]) * (b[0][3] - b[0][1]));
+  if (hit.length) { sel = hit[0][1]; drag = {mode: "move", p, b: bs[sel].slice(), moved: false}; draw(); return; }
+  bs.push([p[0], p[1], p[0], p[1], "H"]); sel = bs.length - 1; drag = {mode: "corner", c: 2, moved: false, fresh: true}; draw();
+};
+cv.onmousemove = e => {
+  if (!drag) return; const p = pt(e), b = st[k].boxes[sel]; drag.moved = true;
+  const cl = (v, m) => Math.max(0, Math.min(m, v));
+  if (drag.mode === "move") { const dx = p[0] - drag.p[0], dy = p[1] - drag.p[1];
+    b[0] = drag.b[0] + dx; b[2] = drag.b[2] + dx; b[1] = drag.b[1] + dy; b[3] = drag.b[3] + dy; }
+  else { const c = drag.c; if (c === 0 || c === 3) b[0] = cl(p[0], img.width); else b[2] = cl(p[0], img.width);
+    if (c === 0 || c === 1) b[1] = cl(p[1], img.height); else b[3] = cl(p[1], img.height); }
+  draw();
+};
+cv.ondblclick = e => {                       // double-click a red ignore region -> make it a bear box
+  const p = pt(e), ig = ITEMS[k].ignore.filter(g => p[0] >= g[0] && p[0] <= g[2] && p[1] >= g[1] && p[1] <= g[3])
+    .sort((a, b) => (a[2] - a[0]) * (a[3] - a[1]) - (b[2] - b[0]) * (b[3] - b[1]));
+  if (!ig.length) return;
+  const g = ig[0], bs = st[k].boxes;
+  if (bs.some(b => b[0] === g[0] && b[1] === g[1] && b[2] === g[2] && b[3] === g[3])) return;
+  bs.push([g[0], g[1], g[2], g[3], "H"]); sel = bs.length - 1; edited(); draw();
+  msg("Đã biến khung đỏ thành khung gấu — kéo góc để chỉnh nếu cần.");
+};
+window.onmouseup = () => {
+  if (!drag) return; const d = drag; drag = null; const bs = st[k].boxes, b = bs[sel];
+  if (b) { const n = [Math.min(b[0], b[2]), Math.min(b[1], b[3]), Math.max(b[0], b[2]), Math.max(b[1], b[3]), d.moved ? "H" : b[4]];
+    if (n[2] - n[0] < 3 || n[3] - n[1] < 3) { bs.splice(sel, 1); sel = -1; if (!d.fresh) edited(); }
+    else { bs[sel] = n; if (d.moved) edited(); } }
+  draw();
+};
+function accept(){
+  const it = ITEMS[k], s = st[k];
+  if (it.cls === "bear" && !s.boxes.length) { msg("Ảnh gấu chưa có khung: vẽ khung cho con gấu, hoặc nhấn x nếu không có gấu."); return; }
+  if (s.decision !== "edited") s.decision = "ok";
+  save(); load(k + 1);
+}
+function nobear(){
+  const it = ITEMS[k], s = st[k];
+  if (it.cls !== "bear") { s.boxes = []; s.decision = "ok"; }
+  else s.decision = s.decision === "nobear" ? null : "nobear";
+  save(); if (s.decision) load(k + 1); else { draw(); info(); }
+}
+function reset(){ st[k] = {decision: null, boxes: ITEMS[k].boxes.map(b => b.slice())}; sel = -1; save(); draw(); info(); }
+function todo(){ for (let j = 1; j <= ITEMS.length; j++) { const i = (k + j) % ITEMS.length; if (!st[i].decision) return load(i); } msg("Đã duyệt hết! Bấm Export kết quả."); }
+window.onkeydown = e => {
+  if (e.key === " " || e.key === "Enter") { e.preventDefault(); accept(); }
+  else if (e.key === "n" || e.key === "ArrowRight") load(k + 1);
+  else if (e.key === "p" || e.key === "ArrowLeft") load(k - 1);
+  else if ((e.key === "Delete" || e.key === "Backspace") && sel >= 0) { st[k].boxes.splice(sel, 1); sel = -1; edited(); draw(); }
+  else if (e.key === "x") nobear();
+  else if (e.key === "r") reset();
+  else if (e.key === "u") todo();
+  else if (e.key === "h") { showIgnore = !showIgnore; draw(); }
+};
+$("prev").onclick = () => load(k - 1); $("next").onclick = () => load(k + 1);
+$("ok").onclick = accept; $("nobear").onclick = nobear; $("reset").onclick = reset; $("todo").onclick = todo;
+$("export").onclick = () => {
+  const out = ITEMS.map((it, i) => ({sha1: it.sha1, decision: st[i].decision,
+    boxes: st[i].boxes.map(b => [b[0] / it.scale, b[1] / it.scale, b[2] / it.scale, b[3] / it.scale, b[4]])}));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], {type: "application/json"}));
+  a.download = "ket_qua_" + PACK.title.replace(/\W+/g, "_") + ".json"; a.click();
+  msg("Đã export " + done() + "/" + ITEMS.length + " ảnh đã duyệt.");
+};
+if (ITEMS.length) load(0);
+</script></body></html>
